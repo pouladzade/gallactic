@@ -12,6 +12,7 @@ import (
 	"github.com/gallactic/gallactic/core/account"
 	"github.com/gallactic/gallactic/core/validator"
 	"github.com/gallactic/gallactic/crypto"
+	amino "github.com/tendermint/go-amino"
 )
 
 // How many bytes to take from the front of the Genesis hash to append
@@ -139,6 +140,15 @@ func (gen *Genesis) Validators() []*validator.Validator {
 	return vals
 }
 
+func (gen *Genesis) ValidatorsAddress() []crypto.Address {
+	var vals []crypto.Address
+	for _, genVal := range gen.data.Validators {
+		vals = append(vals, genVal.Address)
+	}
+
+	return vals
+}
+
 func (gen *Genesis) MaximumPower() int {
 	if gen.data.MaximumPower < len(gen.data.Validators) {
 		return len(gen.data.Validators)
@@ -160,6 +170,43 @@ func (gen *Genesis) UnmarshalJSON(bs []byte) error {
 		return err
 	}
 	return nil
+}
+
+//protobuf marshal,unmrshal and size
+var cdc = amino.NewCodec()
+
+func (gen Genesis) Encode() ([]byte, error) {
+	return cdc.MarshalBinary(&gen.data)
+}
+
+func (gen *Genesis) Decode(bs []byte) error {
+	err := cdc.UnmarshalBinary(bs, &gen.data)
+	if err != nil {
+		return err
+	}
+	return nil
+
+}
+
+func (gen *Genesis) Unmarshal(bs []byte) error {
+	return gen.Decode(bs)
+}
+
+func (gen *Genesis) Marshal() ([]byte, error) {
+	return gen.Encode()
+}
+
+func (gen *Genesis) MarshalTo(data []byte) (int, error) {
+	bs, err := gen.Encode()
+	if err != nil {
+		return -1, err
+	}
+	return copy(data, bs), nil
+}
+
+func (gen *Genesis) Size() int {
+	bs, _ := gen.Encode()
+	return len(bs)
 }
 
 func makeGenesisAccount(acc *account.Account) genAccount {
@@ -244,6 +291,7 @@ func MakeGenesis(chainName string, genesisTime time.Time,
 	}
 }
 
+// LoadFromFile loads genesis object from a JSON file
 func LoadFromFile(file string) (*Genesis, error) {
 	dat, err := ioutil.ReadFile(file)
 	if err != nil {
@@ -254,4 +302,19 @@ func LoadFromFile(file string) (*Genesis, error) {
 		return nil, err
 	}
 	return &gen, nil
+}
+
+// SaveToFile saves the genesis info a JSON file
+func (gen *Genesis) SaveToFile(file string) error {
+	json, err := gen.MarshalJSON()
+	if err != nil {
+		return err
+	}
+
+	// write  dataContent to file
+	if err := ioutil.WriteFile(file, json, 0777); err != nil {
+		return fmt.Errorf("Failed to write genesis file to %s: %v", file, err)
+	}
+
+	return nil
 }

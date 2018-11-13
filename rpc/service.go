@@ -158,19 +158,12 @@ func (s *Service) Peers() (*PeersOutput, error) {
 }
 
 func (s *Service) NetInfo() (*NetInfoOutput, error) {
-	listening := s.nodeView.IsListening()
-	var listeners []string
-	for _, listener := range s.nodeView.Listeners() {
-		listeners = append(listeners, listener.String())
-	}
 	peers, err := s.Peers()
 	if err != nil {
 		return nil, err
 	}
 	return &NetInfoOutput{
-		Listening: listening,
-		Listeners: listeners,
-		Peers:     peers.Peers,
+		Peers: peers.Peers,
 	}, nil
 }
 
@@ -201,6 +194,14 @@ func (s *Service) ListAccounts(predicate func(*account.Account) bool) (*Accounts
 		BlockHeight: s.blockchain.LastBlockHeight(),
 		Accounts:    accounts,
 	}, nil
+}
+
+func (s *Service) GetValidator(address crypto.Address) (*ValidatorOutput, error) {
+	val, err := s.state.GetValidator(address)
+	if err != nil {
+		return nil, err
+	}
+	return &ValidatorOutput{Validator: val}, nil
 }
 
 func (s *Service) GetStorage(address crypto.Address, key []byte) (*StorageOutput, error) {

@@ -1,13 +1,14 @@
 package crypto
 
 import (
-	"unsafe"
-
 	"github.com/gallactic/gallactic/errors"
 	"github.com/mr-tron/base58/base58"
+	amino "github.com/tendermint/go-amino"
 	tmABCI "github.com/tendermint/tendermint/abci/types"
 	tmCrypto "github.com/tendermint/tendermint/crypto"
+	tmCryptoED25519 "github.com/tendermint/tendermint/crypto/ed25519"
 	"golang.org/x/crypto/ed25519"
+	"unsafe"
 )
 
 // PublicKey
@@ -96,13 +97,15 @@ func (pb PublicKey) ABCIPubKey() tmABCI.PubKey {
 
 // TMPubKey returns the tendermint PubKey.
 func (pb PublicKey) TMPubKey() tmCrypto.PubKey {
-	pk := tmCrypto.PubKeyEd25519{}
+	pk := tmCryptoED25519.PubKeyEd25519{}
 	copy(pk[:], pb.RawBytes())
 	return pk
 }
 
 /// ----------
 /// MARSHALING
+
+var cdc = amino.NewCodec()
 
 func (pb PublicKey) MarshalAmino() ([]byte, error) {
 	return pb.RawBytes(), nil
@@ -137,6 +140,27 @@ func (pb *PublicKey) UnmarshalText(text []byte) error {
 	return nil
 }
 
+//protobuf function
+func (pb *PublicKey) Marshal() ([]byte, error) {
+	return pb.MarshalAmino()
+}
+
+func (pb *PublicKey) Unmarshal(bs []byte) error {
+	return pb.UnmarshalAmino(bs)
+}
+
+func (pb *PublicKey) Size() int {
+	bs := pb.data.PublicKey
+	return len(bs)
+}
+
+func (pb *PublicKey) Encode() ([]byte, error) {
+	return cdc.MarshalBinary(&pb.data.PublicKey)
+}
+func (pb *PublicKey) MarshalTo(data []byte) (int, error) {
+	return copy(data, pb.data.PublicKey[:]), nil
+}
+
 /// ----------
 /// ATTRIBUTES
 
@@ -149,11 +173,11 @@ func (pb *PublicKey) EnsureValid() error {
 }
 
 func (pb PublicKey) Verify(msg []byte, signature Signature) bool {
-	return ed25519.Verify(pb.RawBytes(), msg, signature.RawBytes())
+	return ed25519.Verify(pb.RawBytes(), Sha3(msg), signature.RawBytes())
 }
 
 func (pb PublicKey) AccountAddress() Address {
-	tmPubKey := new(tmCrypto.PubKeyEd25519)
+	tmPubKey := new(tmCryptoED25519.PubKeyEd25519)
 	copy(tmPubKey[:], pb.RawBytes())
 	hash := tmPubKey.Address()
 	addr, _ := addressFromHash(hash, prefixAccountAddress)
@@ -162,7 +186,7 @@ func (pb PublicKey) AccountAddress() Address {
 }
 
 func (pb PublicKey) ValidatorAddress() Address {
-	tmPubKey := new(tmCrypto.PubKeyEd25519)
+	tmPubKey := new(tmCryptoED25519.PubKeyEd25519)
 	copy(tmPubKey[:], pb.RawBytes())
 	hash := tmPubKey.Address()
 	addr, _ := addressFromHash(hash, prefixValidatorAddress)

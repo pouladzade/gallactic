@@ -4,9 +4,9 @@ import (
 	"github.com/gallactic/gallactic/core/account"
 	"github.com/gallactic/gallactic/core/account/permission"
 	"github.com/gallactic/gallactic/core/blockchain"
-	"github.com/gallactic/gallactic/core/evm"
-	"github.com/gallactic/gallactic/core/evm/burrow"
+	"github.com/gallactic/gallactic/core/evm/sputnik"
 	"github.com/gallactic/gallactic/core/state"
+	"github.com/gallactic/gallactic/crypto"
 	"github.com/gallactic/gallactic/errors"
 	"github.com/gallactic/gallactic/txs"
 	"github.com/gallactic/gallactic/txs/tx"
@@ -39,32 +39,25 @@ func (ctx *CallContext) Execute(txEnv *txs.Envelope) error {
 			return e.Errorf(e.ErrPermDenied, "%s has %s but needs %s", caller.Address(), caller.Permissions(), permission.CreateContract)
 		}
 
-		callee, err = evm.DeriveNewAccount(caller)
-		if err != nil {
-			return err
-		}
-		callee.SetCode(tx.Data())
+		// In case of create contract we must pass nil as callee
+		// sputnik vm will create the account and returns the code
+		callee = nil
+
 		ctx.Logger.TraceMsg("Creating new contract",
-			"contract_address", callee.Address(),
 			"init_code", tx.Data())
 	} else {
-		// check if its a native contract
-		if evm.IsRegisteredNativeContract(tx.Callee().Address.Word256()) {
-			return e.Errorf(e.ErrInvalidAddress, "attempt to call a native contract at %s, "+
-				"but native contracts cannot be called using CallTx. Use a "+
-				"contract that calls the native contract or the appropriate tx "+
-				"type (eg. PermissionsTx, NameTx)", tx.Callee())
-		}
-
 		/// TODO : write test for this case: create and call in same block
 		callee, err = ctx.Cache.GetAccount(tx.Callee().Address)
 		if err != nil {
 			return err
 		}
+		if callee == nil {
+			return e.Errorf(e.ErrInvalidAddress, "attempt to call a non-existing account: %s", tx.Callee().Address)
+		}
 	}
 
 	if ctx.Committing {
-		err := ctx.Deliver(tx, caller, callee)
+		err := ctx.Deliver(tx, caller, callee,tx.Data())
 		if err != nil {
 			return err
 		}
@@ -82,43 +75,19 @@ func (ctx *CallContext) Execute(txEnv *txs.Envelope) error {
 	return nil
 }
 
-func (ctx *CallContext) Deliver(tx *tx.CallTx, caller, callee *account.Account) error {
+func (ctx *CallContext) Deliver(tx *tx.CallTx, caller, callee *account.Account,code []byte ) error {
 
-	if callee == nil || len(callee.Code()) == 0 {
-		// if you call an account that doesn't exist
-		// or an account with no code then we take fees (sorry pal)
-		// NOTE: it's fine to create a contract and call it within one
-		// block (sequence number will prevent re-ordering of those txs)
-		// but to create with one contract and call with another
-		// you have to wait a block to avoid a re-ordering attack
-		// that will take your fees
-		if callee == nil {
-			panic("panic_test")
-			ctx.Logger.InfoMsg("Call to address that does not exist",
-				"caller_address", tx.Caller(),
-				"callee_address", tx.Callee())
-		} else {
-			ctx.Logger.InfoMsg("Call to address that holds no code",
-				"caller_address", tx.Caller(),
-				"callee_address", tx.Callee())
-		}
+	adapter := sputnik.GallacticAdapter{ctx.BC, ctx.Cache, caller,
+		callee,  tx.GasLimit(), tx.Amount(), code,  caller.Sequence()}
+	ret, err := sputnik.Execute(&adapter)
 
-		return nil
-	}
-
-	var gas uint64
-	ret, err := burrow.Call(ctx.BC, caller, callee, tx, &gas)
 	if err != nil {
 		return err
 	}
-	if tx.CreateContract() {
-		callee.SetCode(ret)
-	}
-	code := callee.Code()
 	ctx.Logger.TraceMsg("Calling existing contract",
 		"contract_address", callee.Address(),
 		"input", tx.Data(),
-		"contract_code", code)
+		"contract_code", callee.Code())
 
 	ctx.Logger.Trace.Log("callee", callee.Address().String())
 	// Create a receipt from the ret and whether it erred.
@@ -129,4 +98,22 @@ func (ctx *CallContext) Deliver(tx *tx.CallTx, caller, callee *account.Account) 
 		structure.ErrorKey, err)
 
 	return nil
+}
+
+// Create a new account from a parent 'creator' account. The creator account will have its
+// sequence number incremented
+func deriveNewAccount(creator *account.Account) (*account.Account, error) {
+	// Generate an address
+	seq := creator.Sequence()
+	creator.IncSequence()
+
+	addr := crypto.DeriveContractAddress(creator.Address(), seq)
+
+	// Create account from address.
+	acc, err := account.NewAccount(addr)
+	if err != nil {
+		return nil, err
+	}
+
+	return acc, nil
 }

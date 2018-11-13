@@ -6,6 +6,7 @@ import (
 
 	"github.com/gallactic/gallactic/common/binary"
 	"golang.org/x/crypto/ripemd160"
+	"golang.org/x/crypto/sha3"
 )
 
 const (
@@ -58,4 +59,12 @@ func DeriveContractAddress(addr Address, sequence uint64) Address {
 
 	ct, _ := ContractAddress(hash)
 	return ct
+}
+
+func Sha3(data ...[]byte) []byte {
+	d := sha3.NewLegacyKeccak256()
+	for _, b := range data {
+		d.Write(b)
+	}
+	return d.Sum(nil)
 }

@@ -63,8 +63,8 @@ type (
 	RPCError struct {
 		Code    int    `json:"code"`
 		Message string `json:"message"`
-		// Note: Data is currently unused, and the data member may be omitted
-		// Data  interface{} `json:"data"`
+		// Note: GetData is currently unused, and the data member may be omitted
+		// GetData  interface{} `json:"data"`
 	}
 )
 
